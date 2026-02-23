@@ -1,22 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Edit2, Trash2, Search, PlusCircle, AlertCircle } from 'lucide-react';
+import { Edit2, Trash2, Search, PlusCircle, AlertCircle, X } from 'lucide-react';
 import Pagination from '../components/Pagination';
 
 const ManageProblems = ({ problems, pagination, fetchProblems, API_BASE }) => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [showConfirm, setShowConfirm] = useState(null);
+  const debounceRef = useRef(null);
 
-  const filteredProblems = problems.filter(p =>
-    p.title.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Debounced server-side search: fires 400ms after user stops typing
+  useEffect(() => {
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      fetchProblems(1, searchTerm);
+    }, 400);
+    return () => clearTimeout(debounceRef.current);
+  }, [searchTerm]);
 
   const handleDelete = async (id) => {
     try {
       await axios.delete(`${API_BASE}/problems/${id}`);
-      fetchProblems(pagination.page);
+      fetchProblems(pagination.page, searchTerm);
       setShowConfirm(null);
     } catch (err) {
       console.error('Failed to delete problem', err);
@@ -24,12 +30,20 @@ const ManageProblems = ({ problems, pagination, fetchProblems, API_BASE }) => {
     }
   };
 
+  const handleClearSearch = () => {
+    setSearchTerm('');
+    fetchProblems(1, '');
+  };
+
   return (
     <div className="manage-problems-view animate-in">
       <header className="manage-header">
         <div className="header-left">
           <h2>Manage Problems</h2>
-          <p className="subtitle">Edit details or remove problems from the platform</p>
+          <p className="subtitle">
+            {pagination.total} problem{pagination.total !== 1 ? 's' : ''} total
+            {searchTerm && ` · showing results for "${searchTerm}"`}
+          </p>
         </div>
         <button className="btn-primary" onClick={() => navigate('/create')}>
           <PlusCircle size={18} /> Add New Problem
@@ -37,14 +51,20 @@ const ManageProblems = ({ problems, pagination, fetchProblems, API_BASE }) => {
       </header>
 
       <div className="glass filter-bar" style={{ marginBottom: '25px', display: 'flex', alignItems: 'center', gap: '15px' }}>
-        <div className="search-group" style={{ flex: 1 }}>
-          <Search size={18} className="search-icon" />
+        <div className="search-group" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Search size={18} className="search-icon" style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
           <input
             type="text"
             placeholder="Search problems by title..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'white', fontSize: '0.95rem' }}
           />
+          {searchTerm && (
+            <button onClick={handleClearSearch} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex' }}>
+              <X size={16} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -55,13 +75,14 @@ const ManageProblems = ({ problems, pagination, fetchProblems, API_BASE }) => {
               <th>Title</th>
               <th>Difficulty</th>
               <th>Points</th>
+              <th>Tags</th>
               <th>Created</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filteredProblems.length > 0 ? (
-              filteredProblems.map(problem => (
+            {problems.length > 0 ? (
+              problems.map(problem => (
                 <tr key={problem.id}>
                   <td>
                     <span className="problem-cell">{problem.title}</span>
@@ -73,6 +94,13 @@ const ManageProblems = ({ problems, pagination, fetchProblems, API_BASE }) => {
                   </td>
                   <td>
                     <span className="points-tag">{problem.points || 0} pts</span>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {(problem.tags || []).map(tag => (
+                        <span key={tag} className="card-tag-chip">{tag}</span>
+                      ))}
+                    </div>
                   </td>
                   <td>
                     <span className="date-text">
@@ -93,8 +121,10 @@ const ManageProblems = ({ problems, pagination, fetchProblems, API_BASE }) => {
               ))
             ) : (
               <tr>
-                <td colSpan="5" className="empty-state">
-                  <div className="empty-text">No problems found matching your search.</div>
+                <td colSpan="6" className="empty-state">
+                  <div className="empty-text">
+                    {searchTerm ? `No problems found matching "${searchTerm}"` : 'No problems found.'}
+                  </div>
                 </td>
               </tr>
             )}
@@ -102,11 +132,12 @@ const ManageProblems = ({ problems, pagination, fetchProblems, API_BASE }) => {
         </table>
       </div>
 
+      {/* Pagination — passes active search on page change */}
       <Pagination
         total={pagination.total}
         page={pagination.page}
         limit={pagination.limit}
-        onPageChange={fetchProblems}
+        onPageChange={(page) => fetchProblems(page, searchTerm)}
       />
 
       {/* Confirmation Modal */}

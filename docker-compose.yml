@@ -34,6 +34,7 @@ services:
       - DB_PORT=5432
       - DB_NAME=postgres
       - RUNNER_IMAGE=python-runner:latest
+      - EXECUTION_STRATEGY=docker
       # This is the name of the volume defined below
       - DOCKER_TEMP_VOLUME=execution_engine_temp
     ports:
@@ -59,6 +60,11 @@ services:
     build:
       context: ./docker/cpp-runner
     image: cpp-runner
+
+  python-runner:
+    build:
+      context: ./docker/python-runner
+    image: python-runner
 
   java-runner:
     build:

@@ -34,31 +34,60 @@ const worker = new Worker('submissionQueue', async (job) => {
     let finalVerdict = 'Accepted';
     let lastOutput = '';
 
-    if (!isPlayground && testCases && testCases.length > 0) {
+    if (!isPlayground) {
       // Problem Submission Strategy
-      for (const testCase of testCases) {
-        const result = await runCode(code, testCase.input, language);
-        lastOutput = result.output;
+      if (!testCases || testCases.length === 0) {
+        console.error(`Error: No test cases found for problem ${problemId}`);
+        finalVerdict = 'Internal Error';
+        lastOutput = 'Error: No test cases configured for this problem. Please contact an admin.';
+      } else {
+        console.log(`Judging ${testCases.length} test cases for problem ${problemId}`);
+        for (let i = 0; i < testCases.length; i++) {
+          const testCase = testCases[i];
+          const result = await runCode(code, testCase.input, language);
+          lastOutput = result.output;
 
-        if (result.verdict !== 'Success') {
-          finalVerdict = result.verdict;
-          break;
-        }
+          if (result.verdict !== 'Success') {
+            finalVerdict = result.verdict;
+            console.log(`Test case ${i + 1} failed with verdict ${finalVerdict}`);
+            break;
+          }
 
-        if (result.output !== testCase.expected_output.trim()) {
-          finalVerdict = 'Wrong Answer';
-          break;
+          // Robust comparison
+          const normalizedOutput = result.output.trim().replace(/\r\n/g, '\n');
+          const normalizedExpected = (testCase.expected_output || '').trim().replace(/\r\n/g, '\n');
+
+          if (normalizedOutput !== normalizedExpected) {
+            finalVerdict = 'Wrong Answer';
+            console.log(`Test case ${i + 1} failed: Expected "${normalizedExpected}", got "${normalizedOutput}"`);
+            break;
+          }
         }
       }
     } else {
-      // Playground Strategy
+      // Playground Strategy (Run Button)
+      console.log(`Running playground job with input: ${input || 'none'}`);
       const result = await runCode(code, input || '', language);
       lastOutput = result.output;
       
       if (result.verdict !== 'Success') {
         finalVerdict = result.verdict;
       } else {
-        finalVerdict = 'Accepted';
+        // If expected output is provided (even in playground), compare it
+        const expectedOutput = job.data.expected_output;
+        if (expectedOutput !== undefined && expectedOutput !== null) {
+          const normalizedOutput = result.output.trim().replace(/\r\n/g, '\n');
+          const normalizedExpected = expectedOutput.trim().replace(/\r\n/g, '\n');
+          
+          if (normalizedOutput === normalizedExpected) {
+             finalVerdict = 'Accepted';
+          } else {
+             finalVerdict = 'Wrong Answer';
+             console.log(`Playground mismatch: Expected "${normalizedExpected}", got "${normalizedOutput}"`);
+          }
+        } else {
+          finalVerdict = 'Success'; // Finished normally, no judgment
+        }
       }
     }
 
@@ -75,7 +104,8 @@ const worker = new Worker('submissionQueue', async (job) => {
         
         if (alreadySolvedRes.rowCount === 0) {
           const problem = await getProblemById(problemId);
-          const pts = getDifficultyPoints(problem.difficulty);
+          // Use problem's own points value (dynamic); fall back to difficulty-based if somehow null
+          const pts = problem.points != null ? problem.points : getDifficultyPoints(problem.difficulty);
           await query('BEGIN');
           await query('INSERT INTO solved_problems (user_id, problem_id) VALUES ($1, $2)', [userId, problemId]);
           await query('UPDATE users SET points = points + $1 WHERE id = $2', [pts, userId]);

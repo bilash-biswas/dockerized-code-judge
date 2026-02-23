@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
+import axios from 'axios';
 import {
   Send,
   ChevronLeft,
@@ -16,11 +17,16 @@ import {
   ChevronUp,
   Trophy,
   AlertTriangle,
-  Code2
+  Code2,
+  Settings,
+  Maximize2,
+  Info
 } from 'lucide-react';
 
+const API_BASE = 'http://localhost:3000';
+
 const LANGUAGE_TEMPLATES = {
-  python: '# Write your Python solution here\n\ndef solve():\n    # Read input\n    # s = input()\n    # n = int(input())\n    # arr = list(map(int, input().split()))\n    \n    # Write logic here\n    print("Hello World")\n\nsolve()',
+  python: '# Write your Python solution here\n\ndef solve():\n    # Read input\n    # s = input()\n    # n = int(input())\n    \n    # Write logic here\n    print("Hello World")\n\nsolve()',
   cpp: '#include <iostream>\nusing namespace std;\n\nint main() {\n    // Write your C++ solution here\n    cout << "Hello World" << endl;\n    return 0;\n}',
   java: 'import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        // Write your Java solution here\n        System.out.println("Hello World");\n    }\n}',
   kotlin: 'import java.util.Scanner\n\nfun main() {\n    // Write your Kotlin solution here\n    println("Hello World")\n}',
@@ -44,32 +50,84 @@ const LANGUAGE_EXTENSIONS = {
 };
 
 const Solve = ({ selectedProblem, setView, code, setCode, loading, result, submitSolution, setResult, submissions }) => {
-  const [activeTab, setActiveTab] = useState('description');
+  const [activeSidebarTab, setActiveSidebarTab] = useState('description');
+  const [activeConsoleTab, setActiveConsoleTab] = useState('testcase'); // 'testcase' or 'result'
   const [showConsole, setShowConsole] = useState(true);
   const [showVerdict, setShowVerdict] = useState(false);
   const [language, setLanguage] = useState('python');
+  const [activeTestCaseIdx, setActiveTestCaseIdx] = useState(0);
+  const [customInput, setCustomInput] = useState('');
+  const [runResult, setRunResult] = useState(null);
+  const [isRunning, setIsRunning] = useState(false);
 
   useEffect(() => {
     if (result && !loading) {
       setShowVerdict(true);
+      setActiveConsoleTab('result');
       const timer = setTimeout(() => {
         setShowVerdict(false);
-      }, 3000);
+      }, 5000);
       return () => clearTimeout(timer);
     }
   }, [result, loading]);
 
   useEffect(() => {
-    // Set initial template if code is empty or language changes
-    if (!code || code === '# write code here\n') { // Check for initial placeholder too
+    if (!code || code === '# Write your Python solution here\n\ndef solve():\n    # Read input\n    # s = input()\n    # n = int(input())\n    \n    # Write logic here\n    print("Hello World")\n\nsolve()') {
       setCode(LANGUAGE_TEMPLATES[language]);
     }
   }, [language, code, setCode]);
+
+  // Update custom input when test case changes
+  useEffect(() => {
+    if (selectedProblem?.test_cases?.length > 0) {
+      setCustomInput(selectedProblem.test_cases[activeTestCaseIdx].input);
+    } else if (selectedProblem?.sample_input) {
+      setCustomInput(selectedProblem.sample_input);
+    }
+  }, [selectedProblem, activeTestCaseIdx]);
 
   const handleLanguageChange = (e) => {
     const newLang = e.target.value;
     setLanguage(newLang);
     setCode(LANGUAGE_TEMPLATES[newLang]);
+  };
+
+  const handleRun = async () => {
+    setIsRunning(true);
+    setActiveConsoleTab('result');
+    setRunResult({ verdict: 'Pending', actual_output: 'Executing test case...' });
+
+    try {
+      // For "Run", we use the playground mode (no problem_id) but with our custom input
+      const res = await axios.post(`${API_BASE}/submit`, {
+        code,
+        language,
+        input: customInput,
+        expected_output: testCases[activeTestCaseIdx]?.expected_output
+      });
+
+      // Wait for result via polling
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        try {
+          const check = await axios.get(`${API_BASE}/jobs/${res.data.jobId}`);
+          if (check.data.state === 'completed' || attempts > 20) {
+            clearInterval(poll);
+            setRunResult(check.data.result);
+            setIsRunning(false);
+          }
+        } catch (pollErr) {
+          console.error("Polling error:", pollErr);
+          clearInterval(poll);
+          setIsRunning(false);
+        }
+        attempts++;
+      }, 1000);
+
+    } catch (err) {
+      setRunResult({ verdict: 'Error', actual_output: err.message });
+      setIsRunning(false);
+    }
   };
 
   const handleSubmit = () => {
@@ -86,138 +144,142 @@ const Solve = ({ selectedProblem, setView, code, setCode, loading, result, submi
   }
 
   const problemSubmissions = submissions.filter(s => s.problem_id === selectedProblem.id);
+  const testCases = selectedProblem.test_cases || (selectedProblem.sample_input ? [{ input: selectedProblem.sample_input, expected_output: selectedProblem.sample_output, is_sample: true }] : []);
 
   return (
-    <div className="solve-container">
-      {/* Top Bar */}
-      <div className="solve-top-bar glass">
-        <div className="left-section">
-          <button onClick={() => setView('detail')} className="icon-btn" title="Back to Problems">
+    <div className="solve-container animate-in">
+      {/* Top Navbar */}
+      <div className="solve-nav-v3 glass">
+        <div className="nav-left">
+          <button onClick={() => setView('detail')} className="back-btn-rounded" title="Back">
             <ChevronLeft size={20} />
           </button>
-          <div className="problem-meta">
-            <span className="problem-title-small">{selectedProblem.title}</span>
-            <span className={`difficulty-dot ${selectedProblem.difficulty?.toLowerCase()}`}></span>
+          <div className="problem-info-pill">
+            <span className="p-title">{selectedProblem.title}</span>
+            <div className={`p-diff ${selectedProblem.difficulty?.toLowerCase()}`}></div>
           </div>
         </div>
 
-        <div className="center-section">
-          <div className="language-selector">
-            <Code2 size={16} className="lang-icon" />
-            <select value={language} onChange={handleLanguageChange} className="lang-select">
-              <option value="python">Python</option>
-              <option value="cpp">C++ (GCC 12)</option>
+        <div className="nav-center">
+          <div className="lang-pill">
+            <Code2 size={16} />
+            <select value={language} onChange={handleLanguageChange}>
+              <option value="python">Python 3</option>
+              <option value="cpp">C++ 17</option>
               <option value="java">Java 17</option>
-              <option value="kotlin">Kotlin 1.9</option>
+              <option value="kotlin">Kotlin</option>
               <option value="go">Go 1.21</option>
               <option value="php">PHP 8.2</option>
               <option value="dart">Dart</option>
-              <option value="c">C (GCC)</option>
-              <option value="sql">SQL (SQLite)</option>
+              <option value="c">C</option>
+              <option value="sql">SQL</option>
             </select>
           </div>
         </div>
-        <div className="top-bar-right">
-          <button className="btn-secondary" onClick={() => setCode(LANGUAGE_TEMPLATES[language])}>
-            <RotateCcw size={16} /> Reset
+
+        <div className="nav-right">
+          <button className="btn-icon-v3" onClick={() => setCode(LANGUAGE_TEMPLATES[language])} title="Reset Code">
+            <RotateCcw size={18} />
           </button>
-          <button className="btn-primary" disabled={loading} onClick={handleSubmit}>
-            <Send size={16} /> Submit
+          <button className="btn-icon-v3" title="Settings">
+            <Settings size={18} />
           </button>
+          <div className="action-btns">
+            <button className="btn-run-v3" disabled={loading || isRunning} onClick={handleRun}>
+              <Play size={16} /> Run
+            </button>
+            <button className="btn-submit-v3" disabled={loading || isRunning} onClick={handleSubmit}>
+              <Send size={16} /> Submit
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="solve-workspace">
-        {/* Left Sidebar - Tabs */}
-        <div className="workspace-sidebar glass">
-          <div className="sidebar-tabs">
-            <button
-              className={activeTab === 'description' ? 'active' : ''}
-              onClick={() => setActiveTab('description')}
-            >
-              <FileText size={18} /> Description
+      <div className="solve-main-v3">
+        {/* Left Pane - Problem Description */}
+        <div className="pane-v3 description-pane glass">
+          <div className="pane-tabs-v3">
+            <button className={activeSidebarTab === 'description' ? 'active' : ''} onClick={() => setActiveSidebarTab('description')}>
+              <FileText size={16} /> Description
             </button>
-            <button
-              className={activeTab === 'hints' ? 'active' : ''}
-              onClick={() => setActiveTab('hints')}
-            >
-              <Lightbulb size={18} /> Tips
+            <button className={activeSidebarTab === 'history' ? 'active' : ''} onClick={() => setActiveSidebarTab('history')}>
+              <HistoryIcon size={16} /> Submissions
             </button>
-            <button
-              className={activeTab === 'history' ? 'active' : ''}
-              onClick={() => setActiveTab('history')}
-            >
-              <HistoryIcon size={18} /> History
+            <button className={activeSidebarTab === 'hints' ? 'active' : ''} onClick={() => setActiveSidebarTab('hints')}>
+              <Lightbulb size={16} /> Editorial
             </button>
           </div>
 
-          <div className="tab-content">
-            {activeTab === 'description' && (
-              <div className="tab-pane animate-in">
-                <h3>{selectedProblem.title}</h3>
-                <div className="difficulty-tag-row">
-                  <span className={`tag ${selectedProblem.difficulty?.toLowerCase()}`}>
-                    {selectedProblem.difficulty}
-                  </span>
-                  <span className="tag-points">{selectedProblem.points || 0} pts</span>
+          <div className="pane-content-v3">
+            {activeSidebarTab === 'description' && (
+              <div className="description-view animate-in">
+                <h2 className="v3-h2">{selectedProblem.title}</h2>
+                <div className="v3-meta">
+                  <span className={`v3-tag ${selectedProblem.difficulty?.toLowerCase()}`}>{selectedProblem.difficulty}</span>
+                  <span className="v3-tag points"><Trophy size={14} /> {selectedProblem.points || 0}</span>
+                  {selectedProblem.is_solved && (
+                    <span className="v3-tag solved-tag"><CheckCircle size={14} /> Solved</span>
+                  )}
                 </div>
-                <div className="problem-desc-mini">
-                  <p>{selectedProblem.description_bn}</p>
-                </div>
-                <div className="format-mini">
-                  <h4>ইনপুট ফরম্যাট:</h4>
-                  <p>{selectedProblem.input_format_bn}</p>
-                  <h4>আউটপুট ফরম্যাট:</h4>
-                  <p>{selectedProblem.output_format_bn}</p>
-                </div>
-                <div className="sample-mini">
-                  <h4>স্যাম্পল ইনপুট:</h4>
-                  <pre>{selectedProblem.sample_input}</pre>
-                  <h4>স্যাম্পল আউটপুট:</h4>
-                  <pre>{selectedProblem.sample_output}</pre>
+                {(selectedProblem.tags || []).length > 0 && (
+                  <div className="v3-tags-row">
+                    {selectedProblem.tags.map(tag => (
+                      <span key={tag} className="v3-tag-chip">{tag}</span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="v3-desc-body">
+                  <p className="bangla-para">{selectedProblem.description_bn}</p>
+
+                  <div className="v3-section">
+                    <h4><Info size={16} /> Input Format</h4>
+                    <p>{selectedProblem.input_format_bn}</p>
+                  </div>
+
+                  <div className="v3-section">
+                    <h4><Info size={16} /> Output Format</h4>
+                    <p>{selectedProblem.output_format_bn}</p>
+                  </div>
+
+                  {testCases.filter(tc => tc.is_sample).map((tc, idx) => (
+                    <div className="v3-sample-card" key={idx}>
+                      <div className="sample-header">Sample Case {idx + 1}</div>
+                      <div className="sample-grid">
+                        <div className="sample-item">
+                          <span>Input</span>
+                          <pre>{tc.input}</pre>
+                        </div>
+                        <div className="sample-item">
+                          <span>Output</span>
+                          <pre>{tc.expected_output}</pre>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
 
-            {activeTab === 'hints' && (
-              <div className="tab-pane animate-in">
-                <h3>কোডিং টিপস</h3>
-                <div className="tips-list">
-                  <div className="tip-item">
-                    <h5>ইনপুট নেয়া</h5>
-                    <code>n = int(input())</code>
-                    <p>একটি ইন্টিজার ইনপুট নিতে এটি ব্যবহার করুন।</p>
-                  </div>
-                  <div className="tip-item">
-                    <h5>লিস্ট ইনপুট</h5>
-                    <code>a, b = list(map(int, input().split()))</code>
-                    <p>একাধিক সংখ্যা এক লাইনে নিতে এটি সবচেয়ে কার্যকর।</p>
-                  </div>
-                  <div className="tip-item">
-                    <h5>আউটপুট</h5>
-                    <code>print(f"Result: {result}")</code>
-                    <p>formatted স্ট্রিং ব্যবহার করলে আউটপুট সুন্দর হয়।</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'history' && (
-              <div className="tab-pane animate-in">
-                <h3>আপনার সাবমিশন</h3>
-                <div className="mini-history-list">
+            {activeSidebarTab === 'history' && (
+              <div className="history-view-v3 animate-in">
+                <h3 className="v3-h3">Submission History</h3>
+                <div className="v3-history-list">
                   {problemSubmissions.length > 0 ? (
                     problemSubmissions.map(sub => (
-                      <div key={sub.id} className="mini-history-item">
-                        <div className="mini-sub-meta">
-                          <span className={`verdict-dot ${sub.verdict ? sub.verdict.toLowerCase().replace(' ', '-') : 'pending'}`}></span>
-                          <span className="mini-date">{new Date(sub.created_at).toLocaleDateString()}</span>
+                      <div key={sub.id} className="v3-history-item">
+                        <div className="v3-hi-status">
+                          <span className={`verdict-v3 ${sub.verdict ? sub.verdict.toLowerCase().replace(' ', '-') : 'pending'}`}>
+                            {sub.verdict === 'Accepted' ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                            {sub.verdict || 'Processing'}
+                          </span>
+                          <span className="v3-hi-date">{new Date(sub.created_at).toLocaleString()}</span>
                         </div>
-                        <span className="mini-verdict">{sub.verdict || 'Processing'}</span>
+                        <div className="v3-hi-lang">{sub.language}</div>
                       </div>
                     ))
                   ) : (
-                    <p className="empty-text">কোন সাবমিশন পাওয়া যায়নি</p>
+                    <div className="v3-empty">No submissions yet</div>
                   )}
                 </div>
               </div>
@@ -225,63 +287,127 @@ const Solve = ({ selectedProblem, setView, code, setCode, loading, result, submi
           </div>
         </div>
 
-        {/* Main Editor Section */}
-        <div className="workspace-main">
-          <div className="editor-wrapper glass">
+        {/* Right Pane - Editor & Console */}
+        <div className="pane-v3 editor-pane">
+          <div className="editor-top-v3 glass">
+            <div className="et-left">
+              <Code2 size={16} /> <span>Main.{LANGUAGE_EXTENSIONS[language]}</span>
+            </div>
+            <div className="et-right">
+              <Maximize2 size={14} className="icon-subtle" />
+            </div>
+          </div>
+
+          <div className="editor-container-v3">
             <Editor
               height="100%"
-              defaultLanguage="python"
               language={LANGUAGE_EXTENSIONS[language]}
               theme="vs-dark"
               value={code}
               onChange={(val) => setCode(val)}
+              onMount={(editor) => {
+                editor.focus();
+              }}
               options={{
-                fontSize: 18,
-                fontFamily: 'JetBrains Mono',
+                fontSize: 16,
+                fontFamily: "'JetBrains Mono', monospace",
                 minimap: { enabled: false },
                 scrollBeyondLastLine: false,
                 automaticLayout: true,
-                padding: { top: 20 },
+                padding: { top: 16 },
                 lineNumbersMinChars: 3,
                 glyphMargin: false,
                 folding: true,
+                lineHeight: 24,
+                scrollbar: {
+                  vertical: 'visible',
+                  horizontal: 'visible',
+                  useShadows: false,
+                  verticalScrollbarSize: 8,
+                  horizontalScrollbarSize: 8
+                }
               }}
             />
           </div>
 
-          {/* Terminal Console */}
-          <div className={`console-tray glass ${showConsole ? 'expanded' : 'collapsed'}`}>
-            <div className="console-header" onClick={() => setShowConsole(!showConsole)}>
-              <div className="header-left">
-                <Terminal size={16} />
+          {/* LeetCode Style Bottom Console */}
+          <div className={`solve-console-v3 glass ${showConsole ? 'expanded' : 'collapsed'}`}>
+            <div className="console-nav-v3">
+              <div className="cn-tabs">
+                <button className={activeConsoleTab === 'testcase' ? 'active' : ''} onClick={() => { setActiveConsoleTab('testcase'); setShowConsole(true); }}>
+                  Testcase
+                </button>
+                <button className={activeConsoleTab === 'result' ? 'active' : ''} onClick={() => { setActiveConsoleTab('result'); setShowConsole(true); }}>
+                  Result
+                </button>
+              </div>
+              <button className="cn-toggle" onClick={() => setShowConsole(!showConsole)}>
                 <span>Console</span>
-                {loading && <div className="status-spinner"></div>}
-              </div>
-              <div className="header-right">
-                {showConsole ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
-              </div>
+                {showConsole ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+              </button>
             </div>
 
             {showConsole && (
-              <div className="console-body">
-                {result ? (
-                  <div className="result-content animate-in">
-                    <div className="result-header-row">
-                      <span className={`result-verdict-large ${result.verdict ? result.verdict.toLowerCase().replace(' ', '-') : 'pending'}`}>
-                        {result.verdict === 'Accepted' ? <CheckCircle size={20} /> :
-                          (result.verdict === 'Queued' || result.verdict === 'Running' || result.verdict === 'Pending' || !result.verdict) ? <Clock size={20} className="spin-slow" /> : <XCircle size={20} />}
-                        {result.verdict || 'Processing...'}
-                      </span>
+              <div className="console-body-v3">
+                {activeConsoleTab === 'testcase' ? (
+                  <div className="testcase-view animate-in">
+                    <div className="case-tabs">
+                      {testCases.map((tc, idx) => (
+                        <button
+                          key={idx}
+                          className={activeTestCaseIdx === idx ? 'active' : ''}
+                          onClick={() => setActiveTestCaseIdx(idx)}
+                        >
+                          Case {idx + 1}
+                        </button>
+                      ))}
                     </div>
-                    <div className="output-section">
-                      <h5>আউটপুট:</h5>
-                      <pre className="terminal-output">{result.actual_output || 'No output produced.'}</pre>
+                    <div className="case-content">
+                      <label>Input =</label>
+                      <textarea
+                        value={customInput}
+                        onChange={(e) => setCustomInput(e.target.value)}
+                        placeholder="Enter your input here..."
+                      />
                     </div>
                   </div>
                 ) : (
-                  <div className="console-idle">
-                    <Play size={32} className="idle-icon" />
-                    <p>আপনার কোড রান করুন বা সাবমিট করুন ফলাফল দেখতে।</p>
+                  <div className="result-view-v3 animate-in">
+                    {(isRunning || loading) ? (
+                      <div className="loading-results">
+                        <div className="status-spinner large"></div>
+                        <p>Running your code...</p>
+                      </div>
+                    ) : (runResult || result) ? (
+                      <div className="results-content">
+                        <div className={`res-verdict ${(runResult || result).verdict?.toLowerCase().replace(' ', '-')}`}>
+                          {(runResult || result).verdict === 'Accepted' ? <CheckCircle size={20} /> : <XCircle size={20} />}
+                          {(runResult || result).verdict}
+                        </div>
+
+                        <div className="res-details">
+                          <div className="res-item">
+                            <label>Input</label>
+                            <pre>{customInput}</pre>
+                          </div>
+                          <div className="res-item">
+                            <label>Output</label>
+                            <pre className="actual">{(runResult || result).actual_output || (runResult || result).output || 'No output'}</pre>
+                          </div>
+                          {selectedProblem.test_cases?.[activeTestCaseIdx]?.expected_output && (
+                            <div className="res-item">
+                              <label>Expected</label>
+                              <pre>{selectedProblem.test_cases[activeTestCaseIdx].expected_output}</pre>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="res-idle">
+                        <Play size={40} />
+                        <p>No results yet. Run or Submit your code to see the output.</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -290,31 +416,14 @@ const Solve = ({ selectedProblem, setView, code, setCode, loading, result, submi
         </div>
       </div>
 
-      {/* Verdict Overlay Animation */}
-      {showVerdict && result && result.verdict && (
-        <div className={`verdict-overlay-backdrop animate-fade-in`}>
-          <div className={`verdict-card-v2 animate-pop-in ${result.verdict === 'Accepted' ? 'success' : 'failure'}`}>
-            <div className="verdict-icon-glow">
-              {result.verdict === 'Accepted' ? (
-                <CheckCircle size={80} className="icon-success" />
-              ) : (
-                <AlertTriangle size={80} className="icon-failure" />
-              )}
-            </div>
-            <h1 className="verdict-text-large">{result.verdict}</h1>
-            <p className="verdict-subtext">
-              {result.verdict === 'Accepted'
-                ? 'Great job! Your solution passed all test cases.'
-                : 'Your solution did not pass. Check the console for details.'}
-            </p>
-            {result.verdict === 'Accepted' && (
-              <div className="reward-badge">
-                <Trophy size={18} /> +{selectedProblem.points || 0} Points
-              </div>
-            )}
-            <div className="verdict-progress-bar">
-              <div className="progress-fill"></div>
-            </div>
+      {/* Verdict Animation Overlay */}
+      {showVerdict && result && result.verdict === 'Accepted' && (
+        <div className="verdict-confetti animate-fade-in">
+          <div className="success-card poof">
+            <Trophy size={60} color="#ffd700" />
+            <h1>All Test Cases Passed!</h1>
+            <p>You've solved "{selectedProblem.title}"</p>
+            <button className="btn-v3-accent" onClick={() => setShowVerdict(false)}>Done</button>
           </div>
         </div>
       )}

@@ -16,9 +16,12 @@ const CreateProblem = ({ API_BASE, fetchProblems }) => {
     sample_input: '',
     sample_output: '',
     difficulty: 'Easy',
+    points: 1,
+    tags: [],
     test_cases: []
   });
 
+  const [tagInput, setTagInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -40,6 +43,8 @@ const CreateProblem = ({ API_BASE, fetchProblems }) => {
         sample_input: res.data.sample_input || '',
         sample_output: res.data.sample_output || '',
         difficulty: res.data.difficulty || 'Easy',
+        points: res.data.points ?? 1,
+        tags: res.data.tags || [],
         test_cases: res.data.test_cases || []
       });
     } catch (err) {
@@ -52,7 +57,34 @@ const CreateProblem = ({ API_BASE, fetchProblems }) => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData(prev => {
+      const updated = { ...prev, [name]: value };
+      // Auto-suggest default points when difficulty changes, unless user already customised it
+      if (name === 'difficulty') {
+        const defaults = { Easy: 1, Medium: 2, Hard: 3 };
+        updated.points = defaults[value] ?? prev.points;
+      }
+      return updated;
+    });
+  };
+
+  const addTag = () => {
+    const trimmed = tagInput.trim();
+    if (trimmed && !formData.tags.includes(trimmed)) {
+      setFormData(prev => ({ ...prev, tags: [...prev.tags, trimmed] }));
+    }
+    setTagInput('');
+  };
+
+  const removeTag = (tag) => {
+    setFormData(prev => ({ ...prev, tags: prev.tags.filter(t => t !== tag) }));
+  };
+
+  const handleTagKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addTag();
+    }
   };
 
   const handleTestCaseChange = (index, field, value) => {
@@ -144,6 +176,43 @@ const CreateProblem = ({ API_BASE, fetchProblems }) => {
             </select>
           </div>
           <div className="input-group">
+            <label>Points Reward</label>
+            <input
+              type="number"
+              name="points"
+              value={formData.points}
+              onChange={handleChange}
+              min="0"
+              max="100"
+              placeholder="e.g. 5"
+              title="Points awarded when a user solves this problem for the first time"
+            />
+          </div>
+        </div>
+
+        {/* Tags */}
+        <div className="input-group">
+          <label>Tags <span style={{ fontSize: '0.8rem', opacity: 0.6 }}>(press Enter or comma to add)</span></label>
+          <div className="tag-input-wrapper">
+            {formData.tags.map((tag) => (
+              <span key={tag} className="tag-chip">
+                {tag}
+                <button type="button" onClick={() => removeTag(tag)} className="tag-chip-remove">×</button>
+              </span>
+            ))}
+            <input
+              className="tag-input-field"
+              value={tagInput}
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={handleTagKeyDown}
+              onBlur={addTag}
+              placeholder={formData.tags.length === 0 ? 'Array, String, Math...' : ''}
+            />
+          </div>
+        </div>
+
+        <div className="form-grid">
+          <div className="input-group">
             <label>Input Format (Bangla)</label>
             <input
               name="input_format_bn"
@@ -152,9 +221,6 @@ const CreateProblem = ({ API_BASE, fetchProblems }) => {
               placeholder="ইনপুট মেথড এখানে লিখুন"
             />
           </div>
-        </div>
-
-        <div className="form-grid">
           <div className="input-group">
             <label>Output Format (Bangla)</label>
             <input
@@ -164,6 +230,9 @@ const CreateProblem = ({ API_BASE, fetchProblems }) => {
               placeholder="আউটপুট মেথড এখানে লিখুন"
             />
           </div>
+        </div>
+
+        <div className="form-grid">
           <div className="input-group">
             <label>Global Sample Input (Shown in UI)</label>
             <input
@@ -173,16 +242,15 @@ const CreateProblem = ({ API_BASE, fetchProblems }) => {
               placeholder="Sample Input string"
             />
           </div>
-        </div>
-
-        <div className="input-group">
-          <label>Global Sample Output (Shown in UI)</label>
-          <input
-            name="sample_output"
-            value={formData.sample_output}
-            onChange={handleChange}
-            placeholder="Expected Output string"
-          />
+          <div className="input-group">
+            <label>Global Sample Output (Shown in UI)</label>
+            <input
+              name="sample_output"
+              value={formData.sample_output}
+              onChange={handleChange}
+              placeholder="Expected Output string"
+            />
+          </div>
         </div>
 
         <div className="test-cases-section">
@@ -234,8 +302,8 @@ const CreateProblem = ({ API_BASE, fetchProblems }) => {
             <Save size={18} /> {loading ? 'Saving...' : (isEdit ? 'Update Problem' : 'Create Problem')}
           </button>
         </div>
-      </form>
-    </div>
+      </form >
+    </div >
   );
 };
 

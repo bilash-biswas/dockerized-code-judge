@@ -1,24 +1,45 @@
-import React, { useState } from 'react';
-import { CheckCircle, ChevronRight, Search, Filter, X } from 'lucide-react';
+import React, { useState, useCallback } from 'react';
+import { CheckCircle, ChevronRight, Search, X } from 'lucide-react';
 import Pagination from '../components/Pagination';
 
 const ProblemList = ({ problems, pagination, fetchProblems, onSelect }) => {
-  const getDifficultyPoints = (difficulty) => {
-    switch (difficulty) {
-      case 'Easy': return 1;
-      case 'Medium': return 2;
-      case 'Hard': return 3;
-      default: return 0;
-    }
-  };
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDifficulty, setFilterDifficulty] = useState('');
+  const [filterTag, setFilterTag] = useState('');
 
-  const filteredProblems = problems.filter(p => {
-    const matchesSearch = p.title.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesDifficulty = filterDifficulty === '' || p.difficulty === filterDifficulty;
-    return matchesSearch && matchesDifficulty;
-  });
+  // Gather unique tags from all problems on the current page for the pill bar
+  const allTags = [...new Set(problems.flatMap(p => p.tags || []))].sort();
+
+  // Local search filter (instant, no re-fetch needed)
+  const filteredProblems = searchTerm
+    ? problems.filter(p => p.title.toLowerCase().includes(searchTerm.toLowerCase()))
+    : problems;
+
+  // Trigger server-side fetch with current active filters
+  const applyFilter = useCallback((page = 1, newDiff = filterDifficulty, newTag = filterTag) => {
+    fetchProblems(page, newTag, newDiff);
+  }, [fetchProblems, filterDifficulty, filterTag]);
+
+  const handleDifficultyToggle = (diff) => {
+    const next = filterDifficulty === diff ? '' : diff;
+    setFilterDifficulty(next);
+    fetchProblems(1, filterTag, next);
+  };
+
+  const handleTagToggle = (tag) => {
+    const next = filterTag === tag ? '' : tag;
+    setFilterTag(next);
+    fetchProblems(1, next, filterDifficulty);
+  };
+
+  const handleResetFilters = () => {
+    setSearchTerm('');
+    setFilterDifficulty('');
+    setFilterTag('');
+    fetchProblems(1, '', '');
+  };
+
+  const difficultyOptions = ['Easy', 'Medium', 'Hard'];
 
   return (
     <div className="problem-list-view animate-in">
@@ -29,7 +50,7 @@ const ProblemList = ({ problems, pagination, fetchProblems, onSelect }) => {
         </div>
       </header>
 
-      {/* Modern Filter Bar */}
+      {/* Filter Bar */}
       <div className="filter-bar-v2 glass">
         <div className="search-box-v2">
           <Search size={18} className="search-icon" />
@@ -46,22 +67,39 @@ const ProblemList = ({ problems, pagination, fetchProblems, onSelect }) => {
           )}
         </div>
 
-        <div className="filter-group">
-          <div className="filter-item">
-            <Filter size={16} />
-            <select
-              value={filterDifficulty}
-              onChange={(e) => setFilterDifficulty(e.target.value)}
-            >
-              <option value="">All Difficulties</option>
-              <option value="Easy">Easy</option>
-              <option value="Medium">Medium</option>
-              <option value="Hard">Hard</option>
-            </select>
-          </div>
+        {/* Difficulty Pill Toggles */}
+        <div className="filter-pills-row">
+          <button
+            className={`filter-pill ${filterDifficulty === '' ? 'active' : ''}`}
+            onClick={() => { setFilterDifficulty(''); fetchProblems(1, filterTag, ''); }}
+          >All</button>
+          {difficultyOptions.map(d => (
+            <button
+              key={d}
+              className={`filter-pill diff-${d.toLowerCase()} ${filterDifficulty === d ? 'active' : ''}`}
+              onClick={() => handleDifficultyToggle(d)}
+            >{d}</button>
+          ))}
         </div>
+
+        {/* Tag Pills — shown only when tags exist */}
+        {allTags.length > 0 && (
+          <div className="filter-pills-row tag-pills-row">
+            <span className="pills-label">Tags:</span>
+            {allTags.map(tag => (
+              <button
+                key={tag}
+                className={`filter-pill tag-pill ${filterTag === tag ? 'active' : ''}`}
+                onClick={() => handleTagToggle(tag)}
+              >
+                {tag} {filterTag === tag && <X size={10} />}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
+      {/* Problem Cards */}
       <div className="problems-grid">
         {filteredProblems.map(p => (
           <div key={p.id} className="glass problem-card" onClick={() => onSelect(p)}>
@@ -76,9 +114,18 @@ const ProblemList = ({ problems, pagination, fetchProblems, onSelect }) => {
               </div>
               <h3>{p.title}</h3>
             </div>
-            <p className="card-desc-en">Points: {getDifficultyPoints(p.difficulty)}</p>
+
+            {/* Tags on card */}
+            {(p.tags || []).length > 0 && (
+              <div className="card-tags">
+                {p.tags.map(tag => (
+                  <span key={tag} className="card-tag-chip">{tag}</span>
+                ))}
+              </div>
+            )}
+
             <div className="card-footer">
-              <span className="points-tag">+{getDifficultyPoints(p.difficulty)} pts</span>
+              <span className="points-tag">+{p.points ?? '?'} pts</span>
               <div className="btn-go">
                 Solve <ChevronRight size={16} />
               </div>
@@ -90,18 +137,19 @@ const ProblemList = ({ problems, pagination, fetchProblems, onSelect }) => {
             <Search size={48} className="empty-icon" />
             <h3>No problems found</h3>
             <p>Try adjusting your search or filters.</p>
-            <button className="btn-v2-secondary" onClick={() => { setSearchTerm(''); setFilterDifficulty(''); }}>
+            <button className="btn-v2-secondary" onClick={handleResetFilters}>
               Reset Filters
             </button>
           </div>
         )}
       </div>
 
+      {/* Pagination — passes active filters to page change */}
       <Pagination
         total={pagination.total}
         page={pagination.page}
         limit={pagination.limit}
-        onPageChange={fetchProblems}
+        onPageChange={(page) => applyFilter(page)}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Layout, History, User, Trophy, LogOut, Cpu, PlusSquare, Home, Settings, Code2 } from 'lucide-react';
+import { Layout, History, User, Trophy, LogOut, Cpu, PlusSquare, Home, Settings, Code2, Swords } from 'lucide-react';
 import { Routes, Route, Navigate, useNavigate, useLocation, Link, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SocketProvider, useSocket } from './context/SocketContext';
@@ -20,6 +20,8 @@ import CreateProblem from './pages/CreateProblem';
 import Dashboard from './pages/Dashboard';
 import ManageProblems from './pages/ManageProblems';
 import Playground from './pages/Playground';
+import BattleLobby from './pages/BattleLobby';
+import BattleArena from './pages/BattleArena';
 
 const API_BASE = 'http://localhost:3000';
 
@@ -74,6 +76,7 @@ function AppContent() {
   const location = useLocation();
 
   const [problemsData, setProblemsData] = useState({ data: [], total: 0, page: 1, limit: 20 });
+  const [manageData, setManageData] = useState({ data: [], total: 0, page: 1, limit: 20 });
   const [selectedProblem, setSelectedProblem] = useState(null);
   const [code, setCode] = useState('');
   const [submissionsData, setSubmissionsData] = useState({ data: [], total: 0, page: 1, limit: 20 });
@@ -88,6 +91,7 @@ function AppContent() {
   useEffect(() => {
     if (user) {
       fetchProblems();
+      fetchManageProblems();
       fetchSubmissions();
       // Only redirect to dashboard if at root or landing/login/register
       const authRoutes = ['/', '/login', '/register', '/landing'];
@@ -102,12 +106,26 @@ function AppContent() {
     }
   }, [user, authLoading, location.pathname]);
 
-  const fetchProblems = async (page = 1) => {
+  const fetchProblems = async (page = 1, tag = '', difficulty = '') => {
     try {
-      const res = await axios.get(`${API_BASE}/problems?page=${page}`);
+      const params = new URLSearchParams({ page });
+      if (tag) params.set('tag', tag);
+      if (difficulty) params.set('difficulty', difficulty);
+      const res = await axios.get(`${API_BASE}/problems?${params.toString()}`);
       setProblemsData(res.data);
     } catch (err) {
       console.error('Failed to fetch problems', err);
+    }
+  };
+
+  const fetchManageProblems = async (page = 1, search = '') => {
+    try {
+      const params = new URLSearchParams({ page });
+      if (search) params.set('search', search);
+      const res = await axios.get(`${API_BASE}/problems?${params.toString()}`);
+      setManageData(res.data);
+    } catch (err) {
+      console.error('Failed to fetch manage problems', err);
     }
   };
 
@@ -277,6 +295,9 @@ function AppContent() {
             <button onClick={() => navigate('/playground')} className={location.pathname === '/playground' ? 'active' : ''}>
               <Code2 size={20} /> Playground
             </button>
+            <button onClick={() => navigate('/battle')} className={location.pathname.startsWith('/battle') ? 'active' : ''}>
+              <Swords size={20} /> Battle
+            </button>
             <button onClick={() => { navigate('/leaderboard'); fetchLeaderboard(); }} className={location.pathname === '/leaderboard' ? 'active' : ''}>
               <Trophy size={20} /> Leaderboard
             </button>
@@ -304,8 +325,24 @@ function AppContent() {
       <div className={`main-content ${(!user || isAuthPage) ? 'full-width' : ''}`}>
         <Routes>
           <Route path="/" element={<Landing setView={(v) => navigate(`/${v}`)} />} />
-          <Route path="/login" element={<Login API_BASE={API_BASE} onLogin={login} />} />
-          <Route path="/register" element={<Register API_BASE={API_BASE} onRegister={register} />} />
+          <Route path="/login" element={
+            <Login
+              authData={authData}
+              setAuthData={setAuthData}
+              handleLogin={handleLogin}
+              setView={(v) => navigate(`/${v}`)}
+              authError={authError}
+            />
+          } />
+          <Route path="/register" element={
+            <Register
+              authData={authData}
+              setAuthData={setAuthData}
+              handleRegister={handleRegister}
+              setView={(v) => navigate(`/${v}`)}
+              authError={authError}
+            />
+          } />
 
           <Route path="/dashboard" element={
             <ProtectedRoute>
@@ -381,7 +418,7 @@ function AppContent() {
             </ProtectedRoute>
           } />
 
-          <Route path="/profile" element={<ProtectedRoute><Profile user={user} /></ProtectedRoute>} />
+          <Route path="/profile/:username?" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
 
           <Route path="/create/:id?" element={
             <ProtectedRoute>
@@ -395,12 +432,24 @@ function AppContent() {
             </ProtectedRoute>
           } />
 
+          <Route path="/battle" element={
+            <ProtectedRoute>
+              <BattleLobby />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/battle/:id" element={
+            <ProtectedRoute>
+              <BattleArena />
+            </ProtectedRoute>
+          } />
+
           <Route path="/manage" element={
             <ProtectedRoute>
               <ManageProblems
-                problems={problemsData.data}
-                pagination={problemsData}
-                fetchProblems={fetchProblems}
+                problems={manageData.data}
+                pagination={manageData}
+                fetchProblems={fetchManageProblems}
                 API_BASE={API_BASE}
               />
             </ProtectedRoute>
